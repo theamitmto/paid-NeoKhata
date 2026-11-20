@@ -5934,30 +5934,32 @@
                     if (statusEl) { statusEl.textContent = 'Creating cloud workspace...'; statusEl.className = 'text-center text-xs pt-1 font-bold text-primary-600'; }
                     const res = typeof window.firebaseRegister === 'function'
                         ? await window.firebaseRegister(email, password, fullName, phone, dob, computedAge)
-                        : { user: { uid: `phone_${phone}`, email, displayName: fullName } };
-                    updateLiveProcessOverlay({ step: 'Account created! Preparing your workspace...', progress: 85 });
+                        : (() => { throw new Error('Firebase service unavailable. Please check internet connection and try again.'); })();
+                    updateLiveProcessOverlay({ step: 'Account created & synced to Firebase! Preparing workspace...', progress: 85 });
                     const sess = { isLoggedIn: true, role: 'user', uid: res.user.uid, name: fullName, phone, email, dob, age: computedAge, username: phone };
                     setAuthSession(sess);
 
                     // Register user in local & cloud directory immediately so Admin & Multi-Device always see it
                     const regList = getDeduplicatedAdminUsers();
-                    if (!regList.some(u => extractCleanPhone(u.phone || '') === phone)) {
-                        const pwdDigest = await hashPasswordSha256(password);
-                        regList.unshift({
-                            uid: res.user.uid,
-                            primaryUid: `phone_${phone}`,
-                            name: fullName,
-                            phone,
-                            email,
-                            dob,
-                            age: computedAge,
-                            termsAccepted: true,
-                            username: phone,
-                            passwordHash: pwdDigest,
-                            createdAt: new Date().toISOString()
-                        });
-                        safeLocalStorageSet('khataflow_registered_users', JSON.stringify(regList));
-                    }
+                    const pwdDigest = await hashPasswordSha256(password);
+                    const existingRegIdx = regList.findIndex(u => extractCleanPhone(u.phone || '') === phone || (u.email || '').toLowerCase() === email);
+                    const newRegEntry = {
+                        uid: res.user.uid,
+                        primaryUid: `phone_${phone}`,
+                        name: fullName,
+                        phone,
+                        email,
+                        dob,
+                        age: computedAge,
+                        termsAccepted: true,
+                        username: phone,
+                        passwordHash: pwdDigest,
+                        createdAt: new Date().toISOString(),
+                        lastLoginAt: new Date().toISOString()
+                    };
+                    if (existingRegIdx >= 0) regList[existingRegIdx] = { ...regList[existingRegIdx], ...newRegEntry };
+                    else regList.unshift(newRegEntry);
+                    safeLocalStorageSet('khataflow_registered_users', JSON.stringify(regList));
 
                     appState = createEmptyAppState();
                     appState.userProfile = { name: fullName, phone, email, dob, age: computedAge, upi: `${phone}@upi`, registered: true, createdAt: new Date().toISOString() };
@@ -5967,15 +5969,20 @@
                     saveState(true);
                     updateAll();
                     updateLiveProcessOverlay({ step: 'Opening NeoKhata Workspace...', progress: 100 });
-                    await new Promise(r => setTimeout(r, 450));
+                    await new Promise(r => setTimeout(r, 250));
                     hideLiveProcessOverlay();
                     dismissAuthGate();
                     if (typeof window.attachMultiDeviceListeners === 'function') window.attachMultiDeviceListeners();
-                    showToast(`Welcome ${fullName}!`);
+                    showToast(`Welcome ${fullName}! Registration synced to Firebase.`);
                 } catch (err) {
                     hideLiveProcessOverlay();
                     refreshAuthCaptcha();
-                    if (statusEl) { statusEl.textContent = err?.message || 'Registration failed.'; statusEl.className = 'text-center text-xs pt-1 font-bold text-rose-600'; }
+                    const errMsg = err?.message || 'Registration failed.';
+                    if (statusEl) {
+                        statusEl.textContent = `Error: ${errMsg}`;
+                        statusEl.className = 'text-center text-xs pt-1 font-bold text-rose-600';
+                    }
+                    showToast(errMsg, 'error');
                 }
             } else {
                 const identifier = (document.getElementById('gate-input-username')?.value || '').trim();
@@ -6016,7 +6023,7 @@
                         setAuthSession(sess);
                         updateAuthUI();
                         updateAll();
-                        await new Promise(r => setTimeout(r, 450));
+                        await new Promise(r => setTimeout(r, 250));
                         hideLiveProcessOverlay();
                         dismissAuthGate();
                         if (typeof window.attachMultiDeviceListeners === 'function') window.attachMultiDeviceListeners();
@@ -6033,28 +6040,28 @@
                         const remainingTries = Math.max(0, maxTries - st.failedAttempts);
                         if (statusEl) {
                             statusEl.textContent = lockDurationMs > 0
-                                ? `Incorrect password! Account locked for ${lockLabel}.`
-                                : `Incorrect Admin password. (${remainingTries} attempt${remainingTries === 1 ? '' : 's'} left before ${initDurLabel} lock)`;
+                                ? `Error: Incorrect password! Account locked for ${lockLabel}.`
+                                : `Error: Incorrect Admin password. (${remainingTries} attempt${remainingTries === 1 ? '' : 's'} left before ${initDurLabel} lock)`;
                             statusEl.className = 'text-center text-xs pt-1 font-bold text-rose-600';
                         }
                         return;
                     }
                 }
                 showLiveProcessOverlay({
-                    badge: 'Identity Verification',
-                    title: 'Your Identity is Verified, Please Wait...',
-                    subtitle: 'आपकी आइडेंटिटी वेरीफाई की जा रही है और आपका डेटा सिंक लोड किया जा रहा है, कृपया प्रतीक्षा करें...',
-                    step: 'Verifying credentials & syncing cloud vault...',
-                    progress: 40,
+                    badge: 'Firebase Verification',
+                    title: 'Verifying Registered Account...',
+                    subtitle: 'Google Firebase से आपका रजिस्ट्रेशन डेटा तुरंत सत्यापित और सिंक किया जा रहा है...',
+                    step: 'Checking registered Mobile / Email in Firebase...',
+                    progress: 45,
                     iconClass: 'fa-solid fa-shield-halved fa-bounce'
                 });
                 try {
-                    if (statusEl) { statusEl.textContent = 'Authenticating with cloud...'; statusEl.className = 'text-center text-xs pt-1 font-bold text-primary-600'; }
+                    if (statusEl) { statusEl.textContent = 'Verifying registered user in Google Firebase...'; statusEl.className = 'text-center text-xs pt-1 font-bold text-primary-600'; }
                     const res = typeof window.firebaseLogin === 'function'
                         ? await window.firebaseLogin(identifier, password)
-                        : { user: { uid: `user_${identifier}`, email: identifier, displayName: identifier, phone: extractCleanPhone(identifier) } };
+                        : (() => { throw new Error('Firebase verification service unavailable.'); })();
                     clearLoginLockoutState(identifier);
-                    updateLiveProcessOverlay({ step: 'Identity Verified! Loading your cloud data sync...', progress: 75 });
+                    updateLiveProcessOverlay({ step: 'Verified! Syncing your Firebase cloud data...', progress: 80 });
                     const u = res.user;
                     const cleanPhone = u.phone || extractCleanPhone(identifier);
                     const sess = { isLoggedIn: true, role: 'user', uid: u.uid, name: u.displayName || 'User', phone: cleanPhone, email: u.email || '', username: cleanPhone || identifier };
@@ -6072,13 +6079,37 @@
                     if (typeof window.attachMultiDeviceListeners === 'function') window.attachMultiDeviceListeners();
                     if (typeof window.syncCurrentUserFromCloud === 'function') await window.syncCurrentUserFromCloud(true, true);
                     updateLiveProcessOverlay({ step: 'Cloud sync complete! Opening workspace...', progress: 100 });
-                    await new Promise(r => setTimeout(r, 400));
+                    await new Promise(r => setTimeout(r, 200));
                     hideLiveProcessOverlay();
                     dismissAuthGate();
                     showToast(`Welcome back, ${sess.name}!`);
                 } catch (err) {
                     hideLiveProcessOverlay();
                     refreshAuthCaptcha();
+
+                    // Strictly block unregistered accounts, show clear error, and redirect to Registration Page
+                    if (err?.code === 'NOT_REGISTERED' || /पहले रजिस्ट्रेशन करें|not registered/i.test(err?.message || '')) {
+                        const notRegMsg = 'Error: यह खाता रजिस्टर्ड नहीं है। कृपया पहले रजिस्ट्रेशन करें, फिर उसके बाद लॉगिन करें।';
+                        showToast(notRegMsg, 'error');
+                        setAuthGateMode('register');
+                        if (cleanIdPhone.length === 10) {
+                            const regPhoneInp = document.getElementById('gate-input-phone');
+                            if (regPhoneInp) {
+                                regPhoneInp.value = cleanIdPhone;
+                                handleGatePhoneInput(cleanIdPhone);
+                            }
+                        } else if (identifier.includes('@')) {
+                            const regEmailInp = document.getElementById('gate-input-email');
+                            if (regEmailInp) regEmailInp.value = lowerId;
+                        }
+                        const regStatusEl = document.getElementById('gate-status-message');
+                        if (regStatusEl) {
+                            regStatusEl.textContent = notRegMsg;
+                            regStatusEl.className = 'text-center text-xs pt-1 font-extrabold text-rose-600';
+                        }
+                        return;
+                    }
+
                     const { st, lockDurationMs, lockLabel } = recordFailedLoginAttempt(identifier);
                     const lpPolicy = ensureLoginLockoutPolicy();
                     const maxTries = Math.max(1, Number(lpPolicy.maxAttempts) || 3);
@@ -6086,8 +6117,8 @@
                     const remainingTries = Math.max(0, maxTries - st.failedAttempts);
                     if (statusEl) {
                         statusEl.textContent = lockDurationMs > 0
-                            ? `Incorrect password! Account locked for ${lockLabel}.`
-                            : `${err?.message || 'Incorrect password.'} (${remainingTries} attempt${remainingTries === 1 ? '' : 's'} left before ${initDurLabel} lock)`;
+                            ? `Error: Incorrect password! Account locked for ${lockLabel}.`
+                            : `Error: ${err?.message || 'Incorrect password.'} (${remainingTries} attempt${remainingTries === 1 ? '' : 's'} left before ${initDurLabel} lock)`;
                         statusEl.className = 'text-center text-xs pt-1 font-bold text-rose-600';
                     }
                 }
@@ -15662,13 +15693,28 @@ ${JSON.stringify(liveSnapshot)}`;
         }
 
         window.firebaseRegister = async function(email, password, fullName, phone, dob = '', age = null) {
-            await ensureCloudReady();
+            const ready = await ensureCloudReady();
             const cleanPh = extractCleanPhoneSafe(phone);
             const cleanEm = (email || '').trim().toLowerCase();
-            const uid = cleanPh.length === 10 ? `phone_${cleanPh}` : `email_${cleanEm.replace(/[^a-z0-9]/g, '_')}`;
+            if (cleanPh.length !== 10) {
+                throw new Error('Please enter a valid 10-digit Mobile Number.');
+            }
+            if (!cleanEm || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEm)) {
+                throw new Error('Please enter a valid Email ID.');
+            }
+            if (!password || String(password).length < 6) {
+                throw new Error('Password must be at least 6 characters long.');
+            }
+            if (!ready || (!rtdb && !db)) {
+                throw new Error('Google Firebase connection failed. Please check your internet and try again.');
+            }
+
+            const uid = `phone_${cleanPh}`;
+            const emailIndexKey = `email_${cleanEm.replace(/[^a-z0-9]/g, '_')}`;
             const hashedPwd = typeof hashPasswordSha256 === 'function'
                 ? await hashPasswordSha256(password)
                 : btoa(unescape(encodeURIComponent(password)));
+            const nowIso = new Date().toISOString();
             const userRecord = {
                 uid,
                 primaryUid: uid,
@@ -15678,113 +15724,165 @@ ${JSON.stringify(liveSnapshot)}`;
                 dob: dob || '',
                 age: age !== null ? Number(age) : null,
                 termsAccepted: true,
-                username: cleanPh || cleanEm,
+                registered: true,
+                username: cleanPh,
                 passwordHash: hashedPwd,
-                createdAt: new Date().toISOString()
+                createdAt: nowIso,
+                lastLoginAt: nowIso
             };
 
-            if (rtdb) {
-                try {
-                    const snap = await get(ref(rtdb, `neokhata_users/${uid}`));
-                    if (snap.exists()) {
-                        throw new Error('Account with this Mobile or Email already exists. Please Sign In.');
-                    }
-                } catch (err) {
-                    if (err?.message?.includes('already exists')) throw err;
-                }
+            // Fast parallel duplicate check across RTDB phone node, email index & Firestore
+            const [rtdbPhoneSnap, rtdbEmailSnap, fsDocSnap] = await Promise.all([
+                rtdb ? get(ref(rtdb, `neokhata_users/${uid}`)).catch(() => null) : Promise.resolve(null),
+                rtdb ? get(ref(rtdb, `neokhata_email_index/${emailIndexKey}`)).catch(() => null) : Promise.resolve(null),
+                db ? getDoc(doc(db, 'neokhata_users', uid)).catch(() => null) : Promise.resolve(null)
+            ]);
+
+            if ((rtdbPhoneSnap && rtdbPhoneSnap.exists()) || (fsDocSnap && fsDocSnap.exists())) {
+                throw new Error('यह Mobile Number पहले से रजिस्टर्ड है। कृपया Login करें।');
+            }
+            if (rtdbEmailSnap && rtdbEmailSnap.exists()) {
+                throw new Error('यह Email ID पहले से रजिस्टर्ड है। कृपया Login करें।');
             }
 
             const regList = typeof getDeduplicatedAdminUsers === 'function' ? getDeduplicatedAdminUsers() : [];
-            if (regList.some(u => (cleanPh.length === 10 && extractCleanPhoneSafe(u.phone || '') === cleanPh) || (cleanEm && (u.email || '').toLowerCase() === cleanEm))) {
-                throw new Error('Account with this Mobile or Email already exists. Please Sign In.');
+            if (regList.some(u => extractCleanPhoneSafe(u.phone || '') === cleanPh || (u.email || '').trim().toLowerCase() === cleanEm)) {
+                throw new Error('यह Mobile Number या Email ID पहले से रजिस्टर्ड है। कृपया Login करें।');
             }
+
+            // Write immediately to Google Firebase (RTDB + Email Index + Firestore) in parallel
+            const writeTasks = [];
+            if (rtdb) {
+                writeTasks.push(set(ref(rtdb, `neokhata_users/${uid}`), sanitizeForRtdb(userRecord)));
+                writeTasks.push(set(ref(rtdb, `neokhata_email_index/${emailIndexKey}`), sanitizeForRtdb({
+                    uid,
+                    phone: cleanPh,
+                    email: cleanEm,
+                    name: fullName,
+                    updatedAt: nowIso
+                })));
+            }
+            if (db) {
+                writeTasks.push(setDoc(doc(db, 'neokhata_users', uid), userRecord, { merge: true }).catch(() => {}));
+            }
+            await Promise.all(writeTasks);
+
             regList.unshift(userRecord);
             localStorage.setItem('khataflow_registered_users', JSON.stringify(regList));
 
-            if (rtdb) {
-                try { await set(ref(rtdb, `neokhata_users/${uid}`), sanitizeForRtdb(userRecord)); } catch (e) {}
-            }
-            if (db) {
-                try { await setDoc(doc(db, 'neokhata_users', uid), userRecord, { merge: true }); } catch (e) {}
-            }
             return { user: { uid, email: cleanEm, displayName: fullName, phone: cleanPh } };
         };
 
         window.firebaseLogin = async function(identifier, password) {
-            await ensureCloudReady();
+            const ready = await ensureCloudReady();
             const idStr = (identifier || '').trim();
             const cleanPh = extractCleanPhoneSafe(idStr);
             const lowerEm = idStr.toLowerCase();
-            const targetUid = cleanPh.length === 10 ? `phone_${cleanPh}` : `email_${lowerEm.replace(/[^a-z0-9]/g, '_')}`;
+            const isEmailInput = lowerEm.includes('@');
 
-            // Point-lookup single user record first to avoid downloading all users on every login
+            if (!idStr || !password) {
+                throw new Error('Please enter your registered Mobile Number or Email ID and Password.');
+            }
+            if (!ready || (!rtdb && !db)) {
+                throw new Error('Google Firebase connection failed. Unable to verify account right now.');
+            }
+
+            const directUid = cleanPh.length === 10
+                ? `phone_${cleanPh}`
+                : `email_${lowerEm.replace(/[^a-z0-9]/g, '_')}`;
+            const emailIndexKey = isEmailInput ? `email_${lowerEm.replace(/[^a-z0-9]/g, '_')}` : '';
+
+            // Instant parallel Firebase lookup (direct user node + email index + Firestore)
             let matched = null;
-            if (rtdb) {
-                try {
-                    const userSnap = await get(ref(rtdb, `neokhata_users/${targetUid}`));
-                    if (userSnap.exists()) matched = userSnap.val();
-                } catch (e) {}
-            }
-            if (!matched && db) {
-                try {
-                    const docSnap = await getDoc(doc(db, 'neokhata_users', targetUid));
-                    if (docSnap.exists()) matched = docSnap.data();
-                } catch (e) {}
-            }
-            if (!matched) {
-                const regList = typeof getDeduplicatedAdminUsers === 'function' ? getDeduplicatedAdminUsers() : [];
-                matched = regList.find(u =>
-                    (cleanPh.length === 10 && extractCleanPhoneSafe(u.phone || '') === cleanPh) ||
-                    (lowerEm && (u.email || '').toLowerCase() === lowerEm)
-                ) || null;
+            let resolvedUid = directUid;
+
+            const [rtdbDirectSnap, rtdbEmailIdxSnap, fsDirectSnap] = await Promise.all([
+                rtdb ? get(ref(rtdb, `neokhata_users/${directUid}`)).catch(() => null) : Promise.resolve(null),
+                (rtdb && emailIndexKey) ? get(ref(rtdb, `neokhata_email_index/${emailIndexKey}`)).catch(() => null) : Promise.resolve(null),
+                db ? getDoc(doc(db, 'neokhata_users', directUid)).catch(() => null) : Promise.resolve(null)
+            ]);
+
+            if (rtdbDirectSnap && rtdbDirectSnap.exists()) {
+                matched = rtdbDirectSnap.val();
+                resolvedUid = matched?.uid || directUid;
+            } else if (rtdbEmailIdxSnap && rtdbEmailIdxSnap.exists()) {
+                const idxData = rtdbEmailIdxSnap.val() || {};
+                const mappedUid = idxData.uid || (idxData.phone ? `phone_${extractCleanPhoneSafe(idxData.phone)}` : '');
+                if (mappedUid && rtdb) {
+                    const mappedSnap = await get(ref(rtdb, `neokhata_users/${mappedUid}`)).catch(() => null);
+                    if (mappedSnap && mappedSnap.exists()) {
+                        matched = mappedSnap.val();
+                        resolvedUid = mappedUid;
+                    }
+                }
+            } else if (fsDirectSnap && fsDirectSnap.exists()) {
+                matched = fsDirectSnap.data();
+                resolvedUid = matched?.uid || directUid;
             }
 
-            if (!matched) {
-                const fallbackName = cleanPh.length === 10 ? `User (${cleanPh})` : idStr.split('@')[0];
-                const newHash = typeof hashPasswordSha256 === 'function'
-                    ? await hashPasswordSha256(password)
-                    : btoa(unescape(encodeURIComponent(password)));
-                const newRec = {
-                    uid: targetUid,
-                    primaryUid: targetUid,
-                    name: fallbackName,
-                    phone: cleanPh,
-                    email: lowerEm.includes('@') ? lowerEm : '',
-                    username: cleanPh || lowerEm,
-                    passwordHash: newHash,
-                    createdAt: new Date().toISOString()
-                };
-                const regList = typeof getDeduplicatedAdminUsers === 'function' ? getDeduplicatedAdminUsers() : [];
-                regList.unshift(newRec);
-                localStorage.setItem('khataflow_registered_users', JSON.stringify(regList));
-                if (rtdb) {
-                    try { await set(ref(rtdb, `neokhata_users/${targetUid}`), sanitizeForRtdb(newRec)); } catch (e) {}
-                }
-                if (db) {
-                    try { await setDoc(doc(db, 'neokhata_users', targetUid), newRec, { merge: true }); } catch (e) {}
-                }
-                return { user: { uid: targetUid, email: newRec.email, displayName: fallbackName, phone: cleanPh } };
+            // Fallback scan across Firebase registered users if user registered before email index existed
+            if (!matched && isEmailInput && rtdb) {
+                try {
+                    const allUsersSnap = await get(ref(rtdb, 'neokhata_users'));
+                    if (allUsersSnap.exists()) {
+                        const foundEntry = Object.entries(allUsersSnap.val() || {}).find(([, u]) =>
+                            u && (u.email || '').trim().toLowerCase() === lowerEm
+                        );
+                        if (foundEntry) {
+                            resolvedUid = foundEntry[0];
+                            matched = foundEntry[1];
+                            // Self-heal email index for sub-second future logins
+                            set(ref(rtdb, `neokhata_email_index/${emailIndexKey}`), sanitizeForRtdb({
+                                uid: resolvedUid,
+                                phone: extractCleanPhoneSafe(matched.phone || ''),
+                                email: lowerEm,
+                                name: matched.name || 'User',
+                                updatedAt: new Date().toISOString()
+                            })).catch(() => {});
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            // STRICT MANDATE: Never allow login if user is not registered in Google Firebase
+            if (!matched || !matched.passwordHash) {
+                const notRegErr = new Error('यह खाता रजिस्टर्ड नहीं है। कृपया पहले रजिस्ट्रेशन करें, फिर उसके बाद लॉगिन करें।');
+                notRegErr.code = 'NOT_REGISTERED';
+                throw notRegErr;
             }
 
             const validPwd = typeof verifyStoredPasswordHash === 'function'
                 ? await verifyStoredPasswordHash(password, matched.passwordHash)
                 : (matched.passwordHash === btoa(unescape(encodeURIComponent(password))));
             if (!validPwd) {
-                throw new Error('Incorrect password. Please check and try again.');
+                throw new Error('गलत पासवर्ड (Incorrect password)। कृपया सही पासवर्ड दर्ज करें।');
             }
 
-            // Upgrade legacy Base64 password hashes seamlessly to SHA-256 on successful login
-            if (matched.passwordHash && !String(matched.passwordHash).startsWith('sha256:') && typeof hashPasswordSha256 === 'function') {
-                const upgradedHash = await hashPasswordSha256(password);
-                matched.passwordHash = upgradedHash;
-                if (rtdb) {
-                    try { await update(ref(rtdb, `neokhata_users/${targetUid}`), { passwordHash: upgradedHash }); } catch (e) {}
-                }
+            // Immediately update lastLoginAt (and upgrade legacy hash if needed) in Google Firebase
+            const nowIso = new Date().toISOString();
+            const updateFields = { lastLoginAt: nowIso };
+            if (!String(matched.passwordHash).startsWith('sha256:') && typeof hashPasswordSha256 === 'function') {
+                updateFields.passwordHash = await hashPasswordSha256(password);
+                matched.passwordHash = updateFields.passwordHash;
             }
+            if (rtdb) {
+                update(ref(rtdb, `neokhata_users/${resolvedUid}`), updateFields).catch(() => {});
+            }
+            if (db) {
+                setDoc(doc(db, 'neokhata_users', resolvedUid), updateFields, { merge: true }).catch(() => {});
+            }
+
+            // Sync registered record into local cache
+            const regList = typeof getDeduplicatedAdminUsers === 'function' ? getDeduplicatedAdminUsers() : [];
+            const rIdx = regList.findIndex(u => (u.uid || '') === resolvedUid || (matched.phone && extractCleanPhoneSafe(u.phone || '') === extractCleanPhoneSafe(matched.phone)));
+            const syncedUserRecord = { ...matched, ...updateFields, uid: resolvedUid };
+            if (rIdx >= 0) regList[rIdx] = syncedUserRecord;
+            else regList.unshift(syncedUserRecord);
+            localStorage.setItem('khataflow_registered_users', JSON.stringify(regList));
 
             return {
                 user: {
-                    uid: targetUid,
+                    uid: resolvedUid,
                     email: matched.email || '',
                     displayName: matched.name || 'User',
                     phone: extractCleanPhoneSafe(matched.phone || cleanPh)
